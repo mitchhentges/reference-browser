@@ -7,12 +7,16 @@ Decision task for pull requests and pushes
 """
 
 from __future__ import print_function
+
+import argparse
 import datetime
+import json
 import os
 import taskcluster
 import sys
 
 import lib.build_variants
+from lib.taskgraph import TaskGraph
 import lib.tasks
 
 TASK_ID = os.environ.get('TASK_ID')
@@ -27,28 +31,53 @@ BUILD_WORKER_TYPE = os.environ.get('BUILD_WORKER_TYPE', '')
 SKIP_TASKS_TRIGGER = '[ci skip]'
 
 
-def create_task(name, description, command, scopes=None, treeherder=None, artifacts=None):
-    return create_raw_task(
+def create_task(name, description, command, generate_cot=False, scopes=None, treeherder=None, artifacts=None):
+    return create_in_repo_task(
         name,
         description,
         full_command='./gradlew --no-daemon clean {}'.format(command),
+        generate_cot=generate_cot,
         scopes=scopes,
         treeherder=treeherder,
         artifacts=artifacts,
     )
 
 
-def create_raw_task(name, description, full_command, scopes=None, treeherder=None, artifacts=None):
+def create_in_repo_task(name, description, full_command, generate_cot=False, scopes=None,
+                        treeherder=None, artifacts=None):
     scopes = [] if scopes is None else scopes
     treeherder = {} if treeherder is None else treeherder
     artifacts = {} if artifacts is None else artifacts
 
+    return create_raw_task(name, description, BUILD_WORKER_TYPE, scopes, treeherder, {
+        "features": {
+            'taskclusterProxy': True,
+            'chainOfTrust': generate_cot
+        },
+        "maxRunTime": 7200,
+        "image": "mozillamobile/android-components:1.15",
+        "command": [
+            "/bin/bash",
+            "--login",
+            "-cx",
+            "cd .. && git clone %s && cd reference-browser && git config advice.detachedHead false && git checkout %s && %s" % (
+                REPO_URL, COMMIT, full_command)
+        ],
+        "artifacts": artifacts,
+        "env": {
+            "TASK_GROUP_ID": TASK_ID
+        }
+    })
+
+
+def create_raw_task(name, description, workerType, scopes, treeherder, payload,
+                    provisioner_id='aws-provisioner-v1', additional_dependencies=None):
     created = datetime.datetime.now()
     expires = taskcluster.fromNow('1 year')
     deadline = taskcluster.fromNow('1 day')
 
     return {
-        "workerType": BUILD_WORKER_TYPE,
+        "workerType": workerType,
         "taskGroupId": TASK_ID,
         "expires": taskcluster.stringDate(expires),
         "retries": 5,
@@ -56,31 +85,15 @@ def create_raw_task(name, description, full_command, scopes=None, treeherder=Non
         "tags": {},
         "priority": "lowest",
         "schedulerId": "taskcluster-github",
-        "provisionerId": "aws-provisioner-v1",
+        "provisionerId": provisioner_id,
         "deadline": taskcluster.stringDate(deadline),
-        "dependencies": [ TASK_ID ],
+        "dependencies": [TASK_ID] + (additional_dependencies or []),
         "routes": [
             "tc-treeherder.v2.reference-browser.{}".format(COMMIT)
         ],
         "scopes": scopes,
         "requires": "all-completed",
-        "payload": {
-            "features": {
-                'taskclusterProxy': True
-            },
-            "maxRunTime": 7200,
-            "image": "mozillamobile/android-components:1.15",
-            "command": [
-                "/bin/bash",
-                "--login",
-                "-cx",
-                "cd .. && git clone %s && cd reference-browser && git config advice.detachedHead false && git checkout %s && %s" % (REPO_URL, COMMIT, full_command)
-            ],
-            "artifacts": artifacts,
-            "env": {
-                "TASK_GROUP_ID": TASK_ID
-            }
-        },
+        "payload": payload,
         "extra": {
             "treeherder": treeherder,
         },
@@ -98,6 +111,7 @@ def create_variant_assemble_task(variant):
         name="assemble: %s" % variant,
         description='Building and testing variant ' + variant,
         command='assemble{} && ls -R /build/reference-browser/'.format(variant.capitalize()),
+        generate_cot=True,
         treeherder={
             'jobKind': 'build',
             'machine': {
@@ -107,6 +121,37 @@ def create_variant_assemble_task(variant):
             'tier': 1,
         },
         artifacts=_craft_artifacts_from_variant(variant),
+    )
+
+
+def create_dep_signing_task(artifacts):
+    return create_raw_task(
+        name='dep-sign',
+        description='Dep-signing for performance testing',
+        workerType='mobile-signing-dep-v1',
+        scopes=[
+            "project:mobile:reference-browser:releng:signing:format:autograph_apk_reference_browser",
+            "project:mobile:reference-browser:releng:signing:cert:{}".format('dep-signing')
+        ],
+        treeherder={
+            'jobKind': 'other',
+            'machine': {
+              'platform': 'android-all',
+            },
+            'symbol': 'Ns',
+            'tier': 1,
+        },
+        payload={
+            "maxRunTime": 3600,
+            "upstreamArtifacts": [{
+                'formats': ['autograph_apk_reference_browser'],
+                'paths': [apk_path],
+                'taskId': task_id,
+                'taskType': 'build'
+            } for (apk_path, task_id) in artifacts]
+        },
+        provisioner_id='scriptworker-prov-v1',
+        additional_dependencies=[task_id for (_, task_id) in artifacts]
     )
 
 
@@ -231,7 +276,7 @@ def create_lint_task():
 
 
 def create_compare_locales_task():
-    return create_raw_task(
+    return create_in_repo_task(
         name='compare-locales',
         description='Validate strings.xml with compare-locales',
         full_command='pip install "compare-locales>=4.0.1,<5.0" && compare-locales --validate l10n.toml .',
@@ -246,13 +291,33 @@ def create_compare_locales_task():
     )
 
 
+def populate_chain_of_trust_required_but_unused_files():
+    # These files are needed to keep chainOfTrust happy. However, they have no need for Reference
+    # Browser # at the moment. For more details,
+    # see: https://github.com/mozilla-releng/scriptworker/pull/209/files#r184180585
+
+    for file_name in ('actions.json', 'parameters.yml'):
+        with open(file_name, 'w') as f:
+            f.truncate()
+            f.write('{}\n')
+
+
 if __name__ == "__main__":
     if SKIP_TASKS_TRIGGER in PR_TITLE:
         print("Pull request title contains", SKIP_TASKS_TRIGGER)
         print("Exit")
         exit(0)
 
-    queue = taskcluster.Queue({ 'baseUrl': 'http://taskcluster/queue/v1' })
+    parser = argparse.ArgumentParser(
+        description='Creates and submits a graph on taskcluster'
+    )
+
+    subparsers = parser.add_subparsers(dest='command')
+
+    subparsers.add_parser('pr-open-or-push')
+    subparsers.add_parser('master-push')
+
+    command = parser.parse_args().command
 
     print("Fetching build variants from gradle")
     variants = lib.build_variants.from_gradle()
@@ -262,12 +327,39 @@ if __name__ == "__main__":
         sys.exit(2)
 
     print("Got variants: " + ' '.join(variants))
+    queue = taskcluster.Queue({'baseUrl': 'http://taskcluster/queue/v1'})
+    task_graph = TaskGraph(queue)
 
+    arm_assemble_task_id = None
+    aarch64_assemble_task_id = None
     for variant in variants:
-        lib.tasks.schedule_task(queue, taskcluster.slugId(), create_variant_assemble_task(variant))
-        lib.tasks.schedule_task(queue, taskcluster.slugId(), create_variant_test_task(variant))
+        task_graph.schedule_new_task(create_variant_test_task(variant))
+        assemble_task_id = task_graph.schedule_new_task(create_variant_assemble_task(variant))
 
-    lib.tasks.schedule_task(queue, taskcluster.slugId(), create_detekt_task())
-    lib.tasks.schedule_task(queue, taskcluster.slugId(), create_ktlint_task())
-    lib.tasks.schedule_task(queue, taskcluster.slugId(), create_compare_locales_task())
-    lib.tasks.schedule_task(queue, taskcluster.slugId(), create_lint_task())
+        arch, build_type = _get_architecture_and_build_type_from_variant(variant)
+        if build_type == 'debug' and arch == 'arm':
+            arm_assemble_task_id = assemble_task_id
+        elif build_type == 'debug' and arch == 'aarch64':
+            aarch64_assemble_task_id = assemble_task_id
+
+    if command == 'master-push':
+        populate_chain_of_trust_required_but_unused_files()
+
+        # autophone only supports arm and aarch64, so only sign/perftest those builds
+        task_graph.schedule_new_task(create_dep_signing_task([
+            ('public/target.apk', arm_assemble_task_id),
+            ('public/target.apk', aarch64_assemble_task_id),
+        ]))
+        # raptor task will be added in follow-up
+
+    task_graph.schedule_new_task(create_detekt_task())
+    task_graph.schedule_new_task(create_ktlint_task())
+    task_graph.schedule_new_task(create_compare_locales_task())
+    task_graph.schedule_new_task(create_lint_task())
+
+    raw_graph = task_graph.get_raw_graph()
+
+    with open('task-graph.json', 'w') as f:
+        json.dump(raw_graph, f)
+
+    populate_chain_of_trust_required_but_unused_files()

@@ -91,7 +91,7 @@ tasks:
             - tc-treeherder.v2.reference-browser.${head_rev}
           payload:
             maxRunTime: 600   # Decision should remain fast enough to schedule a handful of tasks
-            image: mozillamobile/android-components:1.15
+            image: mozillamobile/android-components:1.15 # TODO Stop using the android-components docker image.
             command:
               - /bin/bash
               - --login
@@ -119,53 +119,70 @@ tasks:
       in:
         $if: 'tasks_for in ["github-pull-request", "github-push"]'
         then:
-          $let:
-            pr_or_push_parameters:
-              payload:
-                command:
-                  # TODO Stop using the android-components docker image.
-                  - >-
-                    cd ..
-                    && git clone ${repository}
-                    && cd reference-browser
-                    && git config advice.detachedHead false
-                    && git checkout ${head_rev}
-                    && python automation/taskcluster/decision_task.py
-          in:
-            - $if: 'tasks_for == "github-pull-request" && event["action"] in ["opened", "reopened", "synchronize"]'
-              then:
-                $let:
-                  pull_request_title: ${event.pull_request.title}
-                  pull_request_number: ${event.pull_request.number}
-                  pull_request_url: ${event.pull_request.html_url}
-                in:
-                  $mergeDeep:
-                    - {$eval: 'default_task_definition'}
-                    - {$eval: 'pr_or_push_parameters'}
-                    - scopes:
-                        - ${assume_scope_prefix}:pull-request
-                      payload:
-                        env:
-                          GITHUB_PULL_TITLE: ${pull_request_title}
-                      extra:
-                        treeherder:
-                          symbol: D-PR
-                      metadata:
-                        name: 'Reference-Browser - Decision task (Pull Request #${pull_request_number})'
-                        description: 'Building and testing the Reference Browser - triggered by [#${pull_request_number}](${pull_request_url})'
-            - $if: 'tasks_for == "github-push" && head_branch[:10] != "refs/tags/"'
-              then:
+          - $if: 'tasks_for == "github-pull-request" && event["action"] in ["opened", "reopened", "synchronize"]'
+            then:
+              $let:
+                pull_request_title: ${event.pull_request.title}
+                pull_request_number: ${event.pull_request.number}
+                pull_request_url: ${event.pull_request.html_url}
+              in:
                 $mergeDeep:
                   - {$eval: 'default_task_definition'}
-                  - {$eval: 'pr_or_push_parameters'}
                   - scopes:
-                      - ${assume_scope_prefix}:branch:${short_head_branch}
+                      - ${assume_scope_prefix}:pull-request
+                    payload:
+                      command:
+                        - >-
+                          cd ..
+                          && git clone ${repository}
+                          && cd reference-browser
+                          && git config advice.detachedHead false
+                          && git checkout ${head_rev}
+                          && python automation/taskcluster/decision_task.py pr-open-or-push
+                      env:
+                        GITHUB_PULL_TITLE: ${pull_request_title}
                     extra:
                       treeherder:
-                        symbol: D
+                        symbol: D-PR
                     metadata:
-                      name: Android Components - Decision task
-                      description: Schedules the build and test tasks for Android components.
+                      name: 'Reference-Browser - Decision task (Pull Request #${pull_request_number})'
+                      description: 'Building and testing the Reference Browser - triggered by [#${pull_request_number}](${pull_request_url})'
+          - $if: 'tasks_for == "github-push" && head_branch[:10] != "refs/tags/"'
+            then:
+              $mergeDeep:
+                - {$eval: 'default_task_definition'}
+                - scopes:
+                    - ${assume_scope_prefix}:branch:${short_head_branch}
+                  payload:
+                    features:
+                      chainOfTrust: true
+                    command:
+                      - >-
+                        cd ..
+                        && git clone ${repository}
+                        && cd reference-browser
+                        && git config advice.detachedHead false
+                        && git checkout ${head_rev}
+                        && python automation/taskcluster/decision_task.py master-push
+                    artifacts:
+                      public/task-graph.json:
+                        type: file
+                        path: /build/reference-browser/task-graph.json
+                        expires: ${expires_in}
+                      public/actions.json:
+                        type: file
+                        path: /build/reference-browser/actions.json
+                        expires: ${expires_in}
+                      public/parameters.yml:
+                        type: file
+                        path: /build/reference-browser/parameters.yml
+                        expires: ${expires_in}
+                  extra:
+                    treeherder:
+                      symbol: D
+                  metadata:
+                    name: Android Components - Decision task
+                    description: Schedules the build and test tasks for Android components.
         else:
           - $if: 'tasks_for == "cron"'
             then:

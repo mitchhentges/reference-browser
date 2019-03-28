@@ -11,6 +11,8 @@ from __future__ import print_function
 import argparse
 import arrow
 import json
+
+from lib.taskgraph import TaskGraph
 import lib.tasks
 import os
 import taskcluster
@@ -39,7 +41,7 @@ def generate_build_task(apks):
 
     checkout = 'git clone {} && cd reference-browser && git checkout {}'.format(GITHUB_HTTP_REPOSITORY, HEAD_REV)
 
-    return taskcluster.slugId(), BUILDER.build_task(
+    return BUILDER.build_task(
         name="(Reference Browser) Build task",
         description="Build Reference Browser from source code.",
         command=('cd .. && ' + checkout +
@@ -72,7 +74,7 @@ def generate_signing_task(build_task_id, apks, date, is_staging):
             'dep-signing' if is_staging else 'release-signing')
     ]
 
-    return taskcluster.slugId(), BUILDER.craft_signing_task(
+    return BUILDER.craft_signing_task(
         build_task_id,
         name="(Reference Browser) Signing task",
         description="Sign release builds of Reference Browser",
@@ -129,36 +131,18 @@ def nightly(apks, commit, date_string, is_staging):
     queue = taskcluster.Queue({'baseUrl': 'http://taskcluster/queue/v1'})
     date = arrow.get(date_string)
 
-    task_graph = {}
+    task_graph = TaskGraph(queue)
+    build_task_id = task_graph.schedule_new_task(generate_build_task(apks))
+    sign_task_id = task_graph.schedule_new_task(
+        generate_signing_task(build_task_id, apks, date, is_staging))
+    task_graph.schedule_new_task(generate_push_task(sign_task_id, apks, commit, is_staging))
+    task_graph.schedule_new_task(generate_upload_apk_nimbledroid_task(build_task_id))
 
-    build_task_id, build_task = generate_build_task(apks)
-    lib.tasks.schedule_task(queue, build_task_id, build_task)
-
-    task_graph[build_task_id] = {}
-    task_graph[build_task_id]['task'] = queue.task(build_task_id)
-
-    sign_task_id, sign_task = generate_signing_task(build_task_id, apks, date, is_staging)
-    lib.tasks.schedule_task(queue, sign_task_id, sign_task)
-
-    task_graph[sign_task_id] = {}
-    task_graph[sign_task_id]['task'] = queue.task(sign_task_id)
-
-    push_task_id, push_task = generate_push_task(sign_task_id, apks, commit, is_staging)
-    lib.tasks.schedule_task(queue, push_task_id, push_task)
-
-    task_graph[push_task_id] = {}
-    task_graph[push_task_id]['task'] = queue.task(push_task_id)
-
-    upload_nd_task_id, upload_nd_task = generate_upload_apk_nimbledroid_task(build_task_id)
-    lib.tasks.schedule_task(queue, upload_nd_task_id, upload_nd_task)
-
-    task_graph[upload_nd_task_id] = {}
-    task_graph[upload_nd_task_id]['task'] = queue.task(upload_nd_task_id)
-
-    print(json.dumps(task_graph, indent=4, separators=(',', ': ')))
+    raw_graph = task_graph.get_raw_graph()
+    print(json.dumps(raw_graph, indent=4, separators=(',', ': ')))
 
     with open('task-graph.json', 'w') as f:
-        json.dump(task_graph, f)
+        json.dump(raw_graph, f)
 
     populate_chain_of_trust_required_but_unused_files()
 
