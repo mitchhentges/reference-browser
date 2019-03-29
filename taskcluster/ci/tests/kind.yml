@@ -1,0 +1,39 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+---
+
+loader: taskgraph.loader.transform:loader
+
+transforms:
+    - taskgraph.transforms.job:transforms
+    - taskgraph.transforms.task:transforms
+
+job-defaults:
+    attributes: {}
+    worker-type: aws-provisioner-v1/mobile-3-b-ref-browser
+    worker:
+        docker-image: {indexed: "garbage.v2.try.latest.mobile.base-image"}
+        max-run-time: 7200
+        volumes:
+            - /builds/worker/checkouts
+    run:
+        using: run-task
+
+jobs:
+    detekt:
+        description: 'Running detekt over all modules'
+        run:
+            command: cd /builds/worker/checkouts/src && ./gradlew --no-daemon clean detekt
+    ktlint:
+        description: 'Running ktlint over all modules'
+        run:
+            command: cd /builds/worker/checkouts/src && ./gradlew --no-daemon clean ktlint
+    compare-locales:
+        description: 'Validate strings.xml with compare-locales'
+        run:
+            command: 'pip install "compare-locales>=4.0.1,<5.0" && compare-locales --validate l10n.toml .'
+    lint:
+        description: 'Running tlint over all modules'
+        run:
+            command: cd /builds/worker/checkouts/src && ./gradlew --no-daemon clean lint
