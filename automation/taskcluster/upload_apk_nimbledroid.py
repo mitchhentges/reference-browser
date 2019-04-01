@@ -11,7 +11,6 @@ import taskcluster
 import requests
 import json
 import urllib2
-import os
 
 url = "https://nimbledroid.com/api/v2/apks"
 
@@ -33,10 +32,10 @@ def uploadApk(apk,key):
 
 
 def uploadGeckoViewExampleApk(key):
-		apk_url = 'https://index.taskcluster.net/v1/task/gecko.v2.mozilla-central.latest.mobile.android-api-16-opt/artifacts/public/build/geckoview_example.apk'
+	apk_url = 'https://index.taskcluster.net/v1/task/gecko.v2.mozilla-central.latest.mobile.android-api-16-opt/artifacts/public/build/geckoview_example.apk'
 	apk_data = urllib2.urlopen(apk_url).read()
 	with open('./geckoview_example_nd.apk', 'wb') as f:
-    		f.write(apk_data)
+		f.write(apk_data)
 	uploadApk({'apk' : open('geckoview_example_nd.apk')},key)
 
 

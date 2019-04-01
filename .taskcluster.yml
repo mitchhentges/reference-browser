@@ -210,7 +210,7 @@ tasks:
                           && git clone ${repository}
                           && cd reference-browser
                           && git checkout ${event.release.tag_name}
-                          && python automation/taskcluster/decision_task_nightly.py \
+                          && python automation/taskcluster/decision_task.py release \
                             --date ${now} \
                             ${command_staging_flag}
                       artifacts:

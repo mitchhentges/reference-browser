@@ -2,7 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import argparse
 import datetime
 import jsone
 import os
@@ -11,7 +10,8 @@ import taskcluster
 import yaml
 
 from git import Repo
-from lib.tasks import schedule_task
+
+from lib.taskgraph import schedule_task
 
 ROOT = os.path.join(os.path.dirname(__file__), '../..')
 
@@ -90,7 +90,7 @@ def schedule():
         'cron_task_id': os.environ.get('CRON_TASK_ID', '<cron_task_id>')
     }
     decision_task_id, decision_task = make_decision_task(params)
-    schedule_task(queue, decision_task_id, decision_task)
+    schedule_task(queue, decision_task, task_id=decision_task_id)
     print('All scheduled!')
 
 
