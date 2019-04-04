@@ -1,0 +1,10 @@
+trust-domain: garbage
+treeherder:
+    group-names:
+        'I': 'Docker Image Builds'
+
+task-priority: low
+
+index:
+    products:
+        - mobile
