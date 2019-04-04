@@ -19,7 +19,7 @@ transforms:
 jobs:
     base:
         name: 'mhentges-image'
-        symbol: '🦀🦀M'
+        symbol: 'M'
         index:
             product: 'mobile'
             job-name: 'base-image'
