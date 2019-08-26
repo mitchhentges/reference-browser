@@ -5,9 +5,9 @@
 package org.mozilla.reference.browser
 
 import android.content.Context
-import android.os.Bundle
 import mozilla.components.browser.engine.gecko.GeckoEngine
 import mozilla.components.browser.engine.gecko.fetch.GeckoViewFetchClient
+import mozilla.components.browser.engine.gecko.glean.GeckoAdapter
 import mozilla.components.concept.engine.DefaultSettings
 import mozilla.components.concept.engine.Engine
 import mozilla.components.concept.fetch.Client
@@ -17,7 +17,6 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.reference.browser.ext.isCrashReportActive
 
 object EngineProvider {
-    var testConfig: Bundle? = null
 
     private var runtime: GeckoRuntime? = null
 
@@ -26,11 +25,12 @@ object EngineProvider {
         if (runtime == null) {
             val builder = GeckoRuntimeSettings.Builder()
 
-            testConfig?.let { builder.extras(it) }
-
             if (isCrashReportActive) {
                 builder.crashHandler(CrashHandlerService::class.java)
             }
+
+            // Allow for exfiltrating Gecko metrics through the Glean SDK.
+            builder.telemetryDelegate(GeckoAdapter())
 
             runtime = GeckoRuntime.create(context, builder.build())
         }

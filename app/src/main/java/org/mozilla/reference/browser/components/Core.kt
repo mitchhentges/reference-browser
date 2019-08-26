@@ -14,8 +14,10 @@ import mozilla.components.browser.storage.sync.PlacesHistoryStorage
 import mozilla.components.concept.engine.DefaultSettings
 import mozilla.components.concept.engine.Engine
 import mozilla.components.concept.engine.EngineSession.TrackingProtectionPolicy
-import mozilla.components.concept.engine.EngineSession.TrackingProtectionPolicy.Companion.SAFE_BROWSING_ALL
 import mozilla.components.concept.fetch.Client
+import mozilla.components.feature.media.MediaFeature
+import mozilla.components.feature.media.RecordingDevicesNotificationFeature
+import mozilla.components.feature.media.state.MediaStateMachine
 import mozilla.components.feature.session.HistoryDelegate
 import org.mozilla.reference.browser.AppRequestInterceptor
 import org.mozilla.reference.browser.EngineProvider
@@ -73,6 +75,16 @@ class Core(private val context: Context) {
 
             // Install the "icons" WebExtension to automatically load icons for every visited website.
             icons.install(engine, sessionManager = this)
+
+            // Show an ongoing notification when recording devices (camera, microphone) are used by web content
+            RecordingDevicesNotificationFeature(context, sessionManager = this)
+                .enable()
+
+            MediaStateMachine.start(this)
+
+            // Enable media features like showing an ongoing notification with media controls when
+            // media in web content is playing.
+            MediaFeature(context).enable()
         }
     }
 
@@ -104,11 +116,16 @@ class Core(private val context: Context) {
         privateMode: Boolean = prefs.getBoolean(context.getPreferenceKey(pref_key_tracking_protection_private), true)
     ): TrackingProtectionPolicy {
 
+        val trackingPolicy = TrackingProtectionPolicy.recommended()
         return when {
-            normalMode && privateMode -> TrackingProtectionPolicy.recommended()
-            normalMode && !privateMode -> TrackingProtectionPolicy.recommended().forRegularSessionsOnly()
-            !normalMode && privateMode -> TrackingProtectionPolicy.recommended().forPrivateSessionsOnly()
-            else -> TrackingProtectionPolicy.select(SAFE_BROWSING_ALL)
+            normalMode && privateMode -> trackingPolicy
+            normalMode && !privateMode -> trackingPolicy.forRegularSessionsOnly()
+            !normalMode && privateMode -> trackingPolicy.forPrivateSessionsOnly()
+            else -> TrackingProtectionPolicy.select(
+                    trackingCategories = arrayOf(TrackingProtectionPolicy.TrackingCategory.NONE),
+                    safeBrowsingCategories = arrayOf(TrackingProtectionPolicy.SafeBrowsingCategory.RECOMMENDED),
+                    cookiePolicy = TrackingProtectionPolicy.CookiePolicy.ACCEPT_ALL
+            )
         }
     }
 }
