@@ -20,7 +20,7 @@ def write_secret_to_file(path, data, key, base64decode=False, json_secret=False,
 
 
 def fetch_secret_from_taskcluster(name):
-    secrets = taskcluster.Secrets({'baseUrl': 'http://taskcluster/secrets/v1'})
+    secrets = taskcluster.Secrets({'rootUrl': os.environ['TASKCLUSTER_PROXY_URL']})
     return secrets.get(name)
 
 

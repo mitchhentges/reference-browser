@@ -666,7 +666,7 @@ def schedule_task(queue, taskId, task):
 
 
 def schedule_task_graph(ordered_groups_of_tasks):
-    queue = taskcluster.Queue({'baseUrl': 'http://taskcluster/queue/v1'})
+    queue = taskcluster.Queue({'rootUrl': os.environ['TASKCLUSTER_PROXY_URL']})
     full_task_graph = {}
 
     # TODO: Switch to async python to speed up submission

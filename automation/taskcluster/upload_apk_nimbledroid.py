@@ -42,7 +42,7 @@ def uploadGeckoViewExampleApk(key):
 
 
 # Get JSON data from taskcluster secrets service
-secrets = taskcluster.Secrets({'baseUrl': 'http://taskcluster/secrets/v1'})
+secrets = taskcluster.Secrets({'rootUrl': os.environ['TASKCLUSTER_PROXY_URL']})
 data = secrets.get('project/mobile/reference-browser/nimbledroid')
 
 rb_file_arm = {'apk': open('target.arm.apk')}

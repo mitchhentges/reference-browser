@@ -87,7 +87,7 @@ def schedule():
 
     parser.add_argument('name', choices=['nightly', 'raptor'])
     result = parser.parse_args()
-    queue = taskcluster.Queue({'baseUrl': 'http://taskcluster/queue/v1'})
+    queue = taskcluster.Queue({'rootUrl': os.environ['TASKCLUSTER_PROXY_URL']})
 
     html_url, branch, head_rev = calculate_git_references(ROOT)
     params = {
